@@ -1,0 +1,7 @@
+[Init]
+
+cfzone = #ZONE ID
+
+cftoken = #API key
+
+notes = Fail2Ban_<name>

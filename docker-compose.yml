@@ -1,0 +1,190 @@
+version: '3.8'
+
+networks:
+  web:
+  internal:
+
+services:
+  traefik:
+    image: traefik:v2.10
+    privileged: true
+    container_name: traefik
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 100M
+    environment:
+      - TZ
+      - CF_API_EMAIL
+      - CF_DNS_API_TOKEN
+      - CF_ZONE_API_TOKEN
+    ports:
+      - 80:80
+      - 443:443
+    networks:
+      - web
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:z
+      - ${PWD}/traefik:/etc/traefik:z
+      - ${PWD}/letsencrypt:/letsencrypt:z
+
+  ddns:
+    image: ghcr.io/troglobit/inadyn:latest
+    restart: always
+    container_name: ddns
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 50M
+        reservations:
+          cpus: '0.25'
+          memory: 20M
+    volumes:
+      - ${PWD}/ddns/inadyn.conf:/etc/inadyn.conf:Z
+    environment:
+      - PUID
+      - PGID
+      - TZ
+
+  fail2ban:
+    image: lscr.io/linuxserver/fail2ban:latest
+    container_name: fail2ban
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 50M
+    environment:
+      - TZ
+    volumes:
+      - ${PWD}/fail2ban:/config:z
+      - ${PWD}/vaultwarden:/remotelogs/vaultwarden:ro
+
+  vaultwarden:
+    image: vaultwarden/server
+    restart: always
+    container_name: vaultwarden
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 100M
+    networks:
+      - web
+      - internal
+    labels:
+      - traefik.enable=true
+      - traefik.http.services.vaultwarden-ui.loadbalancer.server.port=80
+      - traefik.http.routers.vaultwarden-http.rule=Host(`example.com`)
+      - traefik.http.routers.vaultwarden-http.entrypoints=web
+      - traefik.http.routers.vaultwarden-http.service=vaultwarden-ui
+      - traefik.http.routers.vaultwarden-http.middlewares=cloudflare-proxy@file
+      - traefik.http.routers.vaultwarden-https.rule=Host(`example.com`)
+      - traefik.http.routers.vaultwarden-https.entrypoints=websecure
+      - traefik.http.routers.vaultwarden-https.tls=true
+      - traefik.http.routers.vaultwarden-https.service=vaultwarden-ui
+      - traefik.http.routers.vaultwarden-https.tls.certresolver=letsencrypt
+      - traefik.http.routers.vaultwarden-https.middlewares=cloudflare-proxy@file
+    depends_on: 
+      - traefik
+      - postgres
+    volumes:
+      - ${PWD}/vaultwarden:/data:z
+    environment:
+      - DATABASE_URL
+      - LOG_FILE
+      - ADMIN_TOKEN
+      - SHOW_PASSWORD_HINT
+      - LOG_LEVEL
+      - ORG_EVENTS_ENABLED
+      - EVENTS_DAYS_RETAIN
+      - TZ
+      - ORG_CREATION_USERS
+      - SIGNUPS_ALLOWED
+      - INVITATIONS_ALLOWED
+      - USER_ATTACHMENT_LIMIT
+      - TRASH_AUTO_DELETE_DAYS
+      - IP_HEADER
+      - SMTP_HOST
+      - SMTP_FROM
+      - SMTP_FROM_NAME
+      - SMTP_SECURITY
+      - SMTP_PORT         
+      - SMTP_USERNAME
+      - SMTP_PASSWORD
+      - WEBSOCKET_ENABLED
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 100M
+    networks:
+      - internal
+    restart: always
+    volumes:
+      - ${PWD}/postgres:/var/lib/postgresql/data:z
+    environment:
+      - TZ
+      - POSTGRES_DB
+      - POSTGRES_USER
+      - POSTGRES_PASSWORD
+
+  watchtower:
+    image: containrrr/watchtower
+    privileged: true
+    restart: always
+    container_name: watchtower
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 50M
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:z
+    environment:
+      - WATCHTOWER_CLEANUP
+      - WATCHTOWER_SCHEDULE
+      - TZ
+
+  backup:
+    image: ttionya/vaultwarden-backup
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 100M
+    container_name: backup
+    depends_on: 
+      - vaultwarden
+      - postgres
+    volumes:
+      - ${PWD}/backup:/config/rclone:Z
+      - ${PWD}/vaultwarden:/vaultwarden:z
+    networks:
+      - internal
+    environment:
+      - RCLONE_REMOTE_NAME
+      - RCLONE_REMOTE_DIR
+      - CRON
+      - ZIP_ENABLE
+      - ZIP_PASSWORD
+      - ZIP_TYPE
+      - BACKUP_FILE_SUFFIX
+      - BACKUP_KEEP_DAYS
+      - PING_URL
+      - DATA_DIR
+      - DB_TYPE
+      - PG_HOST
+      - PG_PORT
+      - PG_DBNAME
+      - PG_USERNAME
+      - PG_PASSWORD
+      - TIMEZONE
